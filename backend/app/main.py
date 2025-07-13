@@ -6,11 +6,12 @@ from pydantic import BaseModel
 from typing import List, Optional
 import shutil
 import tempfile
+import json
 
 import google.generativeai as genai
 
-# Configure Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Configurar API Gemini: defina GEMINI_API_KEY como variável de ambiente no Render
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "SUA_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Models
@@ -52,18 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Utils para PDF (simples, ajustar conforme precisar)
+# Utils para PDF (usando PyMuPDF)
 def extract_pdf_sections(file_path):
-    # Aqui você pode usar PyPDF2 ou fitz (PyMuPDF) para extrair os artigos da lei
-    # Exemplo simples:
     import fitz  # PyMuPDF
     doc = fitz.open(file_path)
     text = "\n".join(page.get_text() for page in doc)
-    # Aqui um exemplo bem básico que divide por "Art.":
     sections = []
     articles = text.split("Art. ")
     for i, a in enumerate(articles[1:], 1):
-        # separa título e texto
         lines = a.strip().split("\n", 1)
         title = f"Art. {lines[0][:4]}"
         content = lines[1] if len(lines) > 1 else ""
@@ -71,7 +68,7 @@ def extract_pdf_sections(file_path):
     return sections
 
 # Função Gemini
-async def call_gemini(messages: list):
+def call_gemini(messages: list):
     prompt = ""
     for m in messages:
         prompt += f"{m['role']}: {m['content']}\n"
@@ -83,77 +80,70 @@ async def call_gemini(messages: list):
 
 @app.post("/extrair/", response_model=ProcessResponse)
 async def extrair(pdf: UploadFile = File(...)):
-    # Salva arquivo temporário
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         shutil.copyfileobj(pdf.file, tmp)
         tmp_path = tmp.name
     try:
         structure = extract_pdf_sections(tmp_path)
+        sections = [Section(**sec) for sec in structure]
     finally:
         os.remove(tmp_path)
-    return {"structure": structure, "schematization": []}
+    return {"structure": sections, "schematization": []}
 
 @app.post("/sumarizar/", response_model=ProcessResponse)
 async def sumarizar(req: StructureRequest):
-    # IA para organizar a estrutura da lei
     prompt = (
         "Organize de forma clara e esquemática os artigos abaixo, melhorando a estrutura. "
-        "Responda em formato JSON: [{title, content}] apenas, sem explicações. "
+        "Responda em formato JSON: [{\"title\": ..., \"content\": ...}] apenas, sem explicações. "
         "Artigos:\n"
     )
     for section in req.structure:
         prompt += f"{section.title}: {section.content}\n"
     messages = [{"role": "user", "content": prompt}]
-    content = await call_gemini(messages)
-    # Tenta ler como JSON, senão devolve como texto bruto
-    import json
+    content = call_gemini(messages)
     try:
         estrutura = json.loads(content)
+        sections = [Section(**s) for s in estrutura]
     except Exception:
-        estrutura = req.structure
-    return {"structure": estrutura, "schematization": []}
+        sections = req.structure
+    return {"structure": sections, "schematization": []}
 
 @app.post("/esquematizar/", response_model=ProcessResponse)
 async def esquematizar(req: StructureRequest):
-    # IA para esquematizar cada artigo
     schematization = []
     for section in req.structure:
         prompt = (
             f"Esquematize o seguinte artigo de lei, destacando tópicos principais, criando um resumo visual esquematizado e destacando palavras importantes:\n"
             f"{section.title}: {section.content}\n"
-            "Responda apenas com tópicos esquematizados em Markdown."
+            "Responda apenas com tópicos esquematizados em Markdown, exemplo:\n"
+            "- **Tópico 1**\n- Destaque\n- Observação importante"
         )
         messages = [{"role": "user", "content": prompt}]
-        esquema = await call_gemini(messages)
-        schematization.append({"title": section.title, "schematization": esquema})
+        esquema = call_gemini(messages)
+        schematization.append(SchematizedSection(title=section.title, schematization=esquema))
     return {"structure": req.structure, "schematization": schematization}
 
 @app.post("/editar/", response_model=ProcessResponse)
 async def editar(req: EditRequest):
-    # Só retorna o que veio (pode adicionar lógica para editar com IA)
     return {"structure": req.structure, "schematization": req.schematization}
 
 @app.post("/exportar/")
 async def exportar(req: ExportRequest):
-    # Gera um PDF ou outro formato
     from fpdf import FPDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     for section in req.structure:
         pdf.multi_cell(0, 10, f"{section.title}\n{section.content}\n")
-        # Busca esquematização
-        esq = next((e for e in req.schematization if e['title'] == section.title), None)
+        esq = next((e for e in req.schematization if e.title == section.title), None)
         if esq:
             pdf.set_font("Arial", style="B", size=12)
-            pdf.multi_cell(0, 10, esq['schematization'])
+            pdf.multi_cell(0, 10, esq.schematization)
             pdf.set_font("Arial", size=12)
         pdf.cell(0, 5, "", ln=True)
     out_path = "lei_esquematizada.pdf"
     pdf.output(out_path)
     return FileResponse(out_path, filename="lei_esquematizada.pdf")
-
-# ------------------ ROOT -------------------
 
 @app.get("/")
 def root():
