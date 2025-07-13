@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -10,11 +10,14 @@ import json
 
 import google.generativeai as genai
 
-# Configurar API Gemini: defina GEMINI_API_KEY como variável de ambiente no Render
+# Configuração Gemini: coloque sua key .env ou direto no painel do Render!
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "SUA_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Models
+# MODELO CORRETO para Gemini: "models/gemini-pro"
+MODEL_NAME = "models/gemini-pro"
+
+# MODELS
 class Section(BaseModel):
     title: str
     content: str
@@ -39,7 +42,6 @@ class ExportRequest(BaseModel):
     schematization: List[SchematizedSection]
     export_format: Optional[str] = "pdf"
 
-# FastAPI app
 app = FastAPI(
     title="Lei Esquematizada API",
     version="1.0.0"
@@ -53,9 +55,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Utils para PDF (usando PyMuPDF)
+# Função para extrair PDF (usando fitz/PyMuPDF)
 def extract_pdf_sections(file_path):
-    import fitz  # PyMuPDF
+    import fitz
     doc = fitz.open(file_path)
     text = "\n".join(page.get_text() for page in doc)
     sections = []
@@ -67,13 +69,14 @@ def extract_pdf_sections(file_path):
         sections.append({"title": title, "content": content})
     return sections
 
-# Função Gemini
+# Função Gemini 100% compatível API grátis
 def call_gemini(messages: list):
     prompt = ""
     for m in messages:
         prompt += f"{m['role']}: {m['content']}\n"
-    model = genai.GenerativeModel("gemini-pro")
-    response = model.generate_content(prompt)
+    # O modelo precisa ser "models/gemini-pro"!
+    model = genai.GenerativeModel(MODEL_NAME)
+    response = model.generate_content([prompt])
     return response.text.strip()
 
 # ------------------ ENDPOINTS -------------------
