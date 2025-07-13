@@ -1,59 +1,52 @@
-import React, { useState } from "react";
-import { Box, Input, Button, Text, VStack, Spinner } from "@chakra-ui/react";
-import { uploadPdf } from "../api";
+import React, { useRef, useState } from "react";
+import { Box, Button, Input, Spinner, Text } from "@chakra-ui/react";
 import { Section } from "../types";
 
-interface Props {
-  onSuccess: (data: { structure: Section[]; pdfFile: File; pdfUrl: string }) => void;
-}
+type Props = {
+  onSuccess: (args: { structure: Section[]; pdfFile: File | null; pdfUrl: string }) => void;
+};
 
-const UploadPDF: React.FC<Props> = ({ onSuccess }) => {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState("");
+export default function UploadPDF({ onSuccess }: Props) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError("");
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type !== "application/pdf") {
-      setError("Selecione um arquivo PDF.");
-      return;
-    }
-    setSelectedFile(file || null);
-  };
+    if (!file) return;
+    setLoading(true);
+    const formData = new FormData();
+    formData.append("pdf", file);
 
-  const handleUpload = async () => {
-    if (!selectedFile) return;
-    setIsUploading(true);
-    setError("");
     try {
-      const data = await uploadPdf(selectedFile);
-      if (!data.structure || data.structure.length === 0) {
-        setError("Não foi possível extrair o texto do PDF.");
-      } else {
-        onSuccess({ structure: data.structure, pdfFile: selectedFile, pdfUrl: "" });
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/extrair/`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.structure) {
+        onSuccess({ structure: data.structure, pdfFile: file, pdfUrl: "" });
       }
     } catch {
-      setError("Erro ao fazer upload do PDF.");
+      alert("Erro ao extrair PDF.");
     }
-    setIsUploading(false);
+    setLoading(false);
   };
 
   return (
-    <VStack spacing={4}>
-      <Input type="file" accept="application/pdf" onChange={handleFileChange} />
-      {selectedFile && (
-        <Text fontSize="sm" color="gray.500">
-          Selecionado: {selectedFile.name}
-        </Text>
-      )}
-      <Button colorScheme="blue" onClick={handleUpload} isLoading={isUploading} isDisabled={!selectedFile}>
-        Enviar PDF
+    <Box textAlign="center">
+      <Input
+        type="file"
+        accept=".pdf"
+        ref={inputRef}
+        onChange={handleUpload}
+        display="none"
+      />
+      <Button colorScheme="blue" onClick={() => inputRef.current?.click()} isLoading={loading}>
+        Enviar PDF da Legislação
       </Button>
-      {error && <Text color="red.500">{error}</Text>}
-      {isUploading && <Spinner />}
-    </VStack>
+      <Text fontSize="sm" mt={4} color="gray.500">
+        Envie o PDF da lei para começar.
+      </Text>
+    </Box>
   );
-};
-
-export default UploadPDF;
+}
