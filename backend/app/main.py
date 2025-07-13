@@ -1,14 +1,19 @@
 import os
-import uuid
-import fitz  # PyMuPDF para extração de PDF
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from typing import List
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import httpx
+from typing import List, Optional
+import shutil
+import tempfile
 
-# ----- MODELOS -----
+import google.generativeai as genai
+
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Models
 class Section(BaseModel):
     title: str
     content: str
@@ -17,132 +22,139 @@ class SchematizedSection(BaseModel):
     title: str
     schematization: str
 
+class ProcessResponse(BaseModel):
+    structure: List[Section]
+    schematization: List[SchematizedSection]
+
 class StructureRequest(BaseModel):
     structure: List[Section]
+
+class EditRequest(BaseModel):
+    structure: List[Section]
+    schematization: List[SchematizedSection]
 
 class ExportRequest(BaseModel):
     structure: List[Section]
     schematization: List[SchematizedSection]
-    export_format: str = "pdf"
+    export_format: Optional[str] = "pdf"
 
-# ----- APP -----
-app = FastAPI()
+# FastAPI app
+app = FastAPI(
+    title="Lei Esquematizada API",
+    version="1.0.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# ----- CHAVE OPENROUTER -----
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # No Render, coloque no painel de env vars!
+# Utils para PDF (simples, ajustar conforme precisar)
+def extract_pdf_sections(file_path):
+    # Aqui você pode usar PyPDF2 ou fitz (PyMuPDF) para extrair os artigos da lei
+    # Exemplo simples:
+    import fitz  # PyMuPDF
+    doc = fitz.open(file_path)
+    text = "\n".join(page.get_text() for page in doc)
+    # Aqui um exemplo bem básico que divide por "Art.":
+    sections = []
+    articles = text.split("Art. ")
+    for i, a in enumerate(articles[1:], 1):
+        # separa título e texto
+        lines = a.strip().split("\n", 1)
+        title = f"Art. {lines[0][:4]}"
+        content = lines[1] if len(lines) > 1 else ""
+        sections.append({"title": title, "content": content})
+    return sections
 
-# ----- IA UTILS -----
-async def call_openrouter(messages):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-4o",
-        "messages": messages,
-        "temperature": 0.2
-    }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url, json=data, timeout=120)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+# Função Gemini
+async def call_gemini(messages: list):
+    prompt = ""
+    for m in messages:
+        prompt += f"{m['role']}: {m['content']}\n"
+    model = genai.GenerativeModel("gemini-pro")
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
-# ----- PROMPTS -----
-async def organizar_ia_real(sections):
-    prompt = (
-        "Você é um especialista em legislação. Sua tarefa é analisar o texto de cada artigo da lei e organizar a estrutura de forma lógica, clara e visual. "
-        "Agrupe por tópicos, separe os artigos, destaque prazos, regras absolutas (em negrito), palavras negativas (em vermelho), faça tabelas para composições e prazos sempre que houver. "
-        "Seu objetivo é facilitar a compreensão para concursos, mantendo a literalidade do texto onde for relevante. Nunca resuma demais, apenas organize e realce o fundamental."
-    )
-    results = []
-    for sec in sections:
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": f"Artigo: {sec.content}"}
-        ]
-        content = await call_openrouter(messages)
-        results.append({"title": sec.title, "content": content})
-    return results
+# ------------------ ENDPOINTS -------------------
 
-async def esquematizar_ia_real(sections):
-    prompt = (
-        "Você é um especialista em esquematização de leis. Para cada artigo, crie esquemas visuais, quadros, tabelas comparativas, destaque prazos, grife palavras negativas de vermelho, regras absolutas em negrito e crie fluxogramas ou quadros nos artigos mais complexos. "
-        "Para todos os artigos, repita a literalidade destacando o mais importante. A apresentação deve ser clara, bonita, fácil para estudo e revisão. Use estrutura markdown ou HTML básico, quadros, emojis, tabelas quando útil."
-    )
-    results = []
-    for sec in sections:
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": f"Artigo: {sec.content}"}
-        ]
-        content = await call_openrouter(messages)
-        results.append({"title": sec.title, "schematization": content})
-    return results
-
-# ----- EXTRAIR PDF -----
-@app.post("/extrair/")
+@app.post("/extrair/", response_model=ProcessResponse)
 async def extrair(pdf: UploadFile = File(...)):
-    if not pdf.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Arquivo deve ser PDF.")
-    pdf_bytes = await pdf.read()
-    tmpname = f"/tmp/{uuid.uuid4().hex}.pdf"
-    with open(tmpname, "wb") as f:
-        f.write(pdf_bytes)
-    doc = fitz.open(tmpname)
-    structure = []
-    for page in doc:
-        text = page.get_text()
-        if text.strip():
-            structure.append({"title": f"Página {page.number+1}", "content": text.strip()})
-    return {"structure": structure, "pdfFile": pdf.filename, "pdfUrl": ""}
+    # Salva arquivo temporário
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        shutil.copyfileobj(pdf.file, tmp)
+        tmp_path = tmp.name
+    try:
+        structure = extract_pdf_sections(tmp_path)
+    finally:
+        os.remove(tmp_path)
+    return {"structure": structure, "schematization": []}
 
-# ----- ORGANIZAR -----
-@app.post("/sumarizar/")
+@app.post("/sumarizar/", response_model=ProcessResponse)
 async def sumarizar(req: StructureRequest):
-    organizado = await organizar_ia_real(req.structure)
-    return {"structure": organizado}
+    # IA para organizar a estrutura da lei
+    prompt = (
+        "Organize de forma clara e esquemática os artigos abaixo, melhorando a estrutura. "
+        "Responda em formato JSON: [{title, content}] apenas, sem explicações. "
+        "Artigos:\n"
+    )
+    for section in req.structure:
+        prompt += f"{section.title}: {section.content}\n"
+    messages = [{"role": "user", "content": prompt}]
+    content = await call_gemini(messages)
+    # Tenta ler como JSON, senão devolve como texto bruto
+    import json
+    try:
+        estrutura = json.loads(content)
+    except Exception:
+        estrutura = req.structure
+    return {"structure": estrutura, "schematization": []}
 
-# ----- ESQUEMATIZAR -----
-@app.post("/esquematizar/")
+@app.post("/esquematizar/", response_model=ProcessResponse)
 async def esquematizar(req: StructureRequest):
-    esquematizado = await esquematizar_ia_real(req.structure)
-    return {"schematization": esquematizado}
+    # IA para esquematizar cada artigo
+    schematization = []
+    for section in req.structure:
+        prompt = (
+            f"Esquematize o seguinte artigo de lei, destacando tópicos principais, criando um resumo visual esquematizado e destacando palavras importantes:\n"
+            f"{section.title}: {section.content}\n"
+            "Responda apenas com tópicos esquematizados em Markdown."
+        )
+        messages = [{"role": "user", "content": prompt}]
+        esquema = await call_gemini(messages)
+        schematization.append({"title": section.title, "schematization": esquema})
+    return {"structure": req.structure, "schematization": schematization}
 
-# ----- EXPORTAR PDF -----
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib import colors
-
-def gerar_pdf_completo(structure, schematization, filename="output.pdf"):
-    doc = SimpleDocTemplate(filename, pagesize=A4, title="Lei Esquematizada")
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="CenterTitle", alignment=TA_CENTER, fontSize=16, leading=20, spaceAfter=14))
-    elems = []
-    for sec, esquem in zip(structure, schematization):
-        elems.append(Paragraph(f"<b>{sec['title']}</b>", styles["CenterTitle"]))
-        elems.append(Spacer(1, 6))
-        elems.append(Paragraph(sec['content'], styles["BodyText"]))
-        elems.append(Spacer(1, 8))
-        elems.append(Paragraph("<b>Esquematização:</b>", styles["Heading3"]))
-        elems.append(Paragraph(esquem['schematization'], styles["BodyText"]))
-        elems.append(PageBreak())
-    doc.build(elems)
+@app.post("/editar/", response_model=ProcessResponse)
+async def editar(req: EditRequest):
+    # Só retorna o que veio (pode adicionar lógica para editar com IA)
+    return {"structure": req.structure, "schematization": req.schematization}
 
 @app.post("/exportar/")
 async def exportar(req: ExportRequest):
-    filename = f"/tmp/lei_esquematizada_{uuid.uuid4().hex}.pdf"
-    gerar_pdf_completo([s.dict() for s in req.structure], [e.dict() for e in req.schematization], filename)
-    return FileResponse(filename, media_type='application/pdf', filename="lei_esquematizada.pdf")
+    # Gera um PDF ou outro formato
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for section in req.structure:
+        pdf.multi_cell(0, 10, f"{section.title}\n{section.content}\n")
+        # Busca esquematização
+        esq = next((e for e in req.schematization if e['title'] == section.title), None)
+        if esq:
+            pdf.set_font("Arial", style="B", size=12)
+            pdf.multi_cell(0, 10, esq['schematization'])
+            pdf.set_font("Arial", size=12)
+        pdf.cell(0, 5, "", ln=True)
+    out_path = "lei_esquematizada.pdf"
+    pdf.output(out_path)
+    return FileResponse(out_path, filename="lei_esquematizada.pdf")
 
-# ----- HOME -----
+# ------------------ ROOT -------------------
+
 @app.get("/")
-def read_root():
-    return {"msg": "API de Lei Esquematizada Online!"}
+def root():
+    return {"msg": "API Lei Esquematizada online!"}
