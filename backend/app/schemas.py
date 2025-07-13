@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 class Section(BaseModel):
@@ -8,10 +8,6 @@ class Section(BaseModel):
 class SchematizedSection(BaseModel):
     title: str
     schematization: str
-
-class ProcessResponse(BaseModel):
-    structure: List[Section]
-    schematization: List[SchematizedSection]
 
 class StructureRequest(BaseModel):
     structure: List[Section]
