@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import {
-  Box, Heading, Container, Stepper, Step, StepIndicator, StepStatus,
-  StepTitle, StepDescription, StepSeparator, Button, useToast
+  Box, Heading, Container, Stepper, Step, StepIndicator,
+  StepStatus, StepTitle, StepDescription, StepSeparator,
+  Button, useToast
 } from "@chakra-ui/react";
 import UploadPDF from "./components/UploadPDF";
 import EstruturaView from "./components/EstruturaView";
