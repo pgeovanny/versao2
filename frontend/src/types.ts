@@ -7,4 +7,3 @@ export interface SchematizedSection {
   title: string;
   schematization: string;
 }
-
