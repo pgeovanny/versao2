@@ -2,9 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from app.pdf_utils import extract_structure
 from app.ia_client import IAClient
-from app.schemas import Structure, Schematization, EditRequest, ExportRequest
-
-import os
+from app.schemas import Section, SchematizedSection, EditRequest, ExportRequest, StructureRequest
 
 app = FastAPI(
     title="Lei Esquematizada API",
@@ -12,7 +10,6 @@ app = FastAPI(
     description="API para esquematização e exportação de legislação."
 )
 
-# Habilita o CORS (caso use frontend separado)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,7 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inicializa o cliente da IA
 ia_client = IAClient()
 
 @app.get("/")
@@ -40,29 +36,29 @@ async def extrair(pdf: UploadFile = File(...)):
     return {"structure": structure}
 
 @app.post("/sumarizar/")
-async def sumarizar(structure: Structure = Body(...)):
+async def sumarizar(request: StructureRequest):
     """
     Organiza e sumariza a estrutura extraída antes de esquematizar.
     """
     try:
-        result = await ia_client.organizar_estrutura(structure.structure)
+        result = await ia_client.organizar_estrutura(request.structure)
         return {"summarized": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao organizar: {str(e)}")
 
 @app.post("/esquematizar/")
-async def esquematizar(structure: Structure = Body(...)):
+async def esquematizar(request: StructureRequest):
     """
     Esquematiza TODOS os artigos da lei de forma avançada, destacando pontos importantes, criando quadros, grifos, etc.
     """
     try:
-        result = await ia_client.esquematizar_estrutura(structure.structure)
+        result = await ia_client.esquematizar_estrutura(request.structure)
         return {"schematization": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao esquematizar: {str(e)}")
 
 @app.post("/editar/")
-async def editar(edit_req: EditRequest = Body(...)):
+async def editar(edit_req: EditRequest):
     """
     Permite editar ou incluir questões, comentários, quadros, fluxogramas, etc, em locais específicos.
     """
@@ -73,7 +69,7 @@ async def editar(edit_req: EditRequest = Body(...)):
         raise HTTPException(status_code=500, detail=f"Erro ao editar: {str(e)}")
 
 @app.post("/exportar/")
-async def exportar(export_req: ExportRequest = Body(...)):
+async def exportar(export_req: ExportRequest):
     """
     Exporta o conteúdo gerado em PDF totalmente formatado, com cores, quadros, logo e visual profissional.
     """
@@ -81,9 +77,6 @@ async def exportar(export_req: ExportRequest = Body(...)):
         # Implemente a geração real de PDF no utils/pdf_exporter.py, aqui é um placeholder
         from app.pdf_exporter import gerar_pdf
         output = gerar_pdf(export_req)
-        # Você pode retornar um link para download ou o arquivo binário
         return {"status": "Exportação realizada!", "file_url": output}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao exportar: {str(e)}")
-
-
