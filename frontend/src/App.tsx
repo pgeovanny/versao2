@@ -1,5 +1,8 @@
 import React, { useState } from "react";
-import { Box, Heading, Container, Stepper, Step, StepIndicator, StepStatus, StepTitle, StepDescription, StepSeparator, Button, useToast } from "@chakra-ui/react";
+import {
+  Box, Heading, Container, Stepper, Step, StepIndicator, StepStatus,
+  StepTitle, StepDescription, StepSeparator, Button, useToast
+} from "@chakra-ui/react";
 import UploadPDF from "./components/UploadPDF";
 import EstruturaView from "./components/EstruturaView";
 import EsquematizacaoView from "./components/EsquematizacaoView";
@@ -44,7 +47,11 @@ function App() {
         {steps.map((step, idx) => (
           <Step key={idx}>
             <StepIndicator>
-              <StepStatus complete={<Box bg="blue.400" w={4} h={4} borderRadius="full" />} active={<Box bg="blue.500" w={4} h={4} borderRadius="full" />} incomplete={<Box bg="gray.300" w={4} h={4} borderRadius="full" />} />
+              <StepStatus
+                complete={<Box bg="blue.400" w={4} h={4} borderRadius="full" />}
+                active={<Box bg="blue.500" w={4} h={4} borderRadius="full" />}
+                incomplete={<Box bg="gray.300" w={4} h={4} borderRadius="full" />}
+              />
             </StepIndicator>
             <Box flexShrink={0}>
               <StepTitle>{step.title}</StepTitle>
