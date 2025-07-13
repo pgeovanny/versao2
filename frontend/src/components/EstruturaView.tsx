@@ -1,15 +1,15 @@
 import React from "react";
-import { Box, Button, VStack, Text, Divider, Spinner } from "@chakra-ui/react";
+import { Box, Button, VStack, Text, Divider } from "@chakra-ui/react";
 import { Section } from "../types";
 
 type Props = {
   structure: Section[];
-  onSumarizar: (structure: Section[]) => void;
+  onEsquematizar: (structure: Section[]) => void;
   isLoading: boolean;
   onBack: () => void;
 };
 
-export default function EstruturaView({ structure, onSumarizar, isLoading, onBack }: Props) {
+export default function EsquematizacaoView({ structure, onEsquematizar, isLoading, onBack }: Props) {
   return (
     <Box>
       <VStack align="stretch" spacing={4}>
@@ -24,8 +24,8 @@ export default function EstruturaView({ structure, onSumarizar, isLoading, onBac
       <Button variant="outline" mr={2} onClick={onBack}>
         Voltar
       </Button>
-      <Button colorScheme="blue" onClick={() => onSumarizar(structure)} isLoading={isLoading}>
-        Organizar/Estruturar com IA
+      <Button colorScheme="blue" onClick={() => onEsquematizar(structure)} isLoading={isLoading}>
+        Esquematizar com IA
       </Button>
     </Box>
   );
